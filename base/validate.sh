@@ -16,13 +16,13 @@ status "running pep8"
 pep8 --config=pep8rc relengapi || not_ok "pep8 failed"
 
 status "running pep8 -- slaveloan"
-pep8 --config=pep8rc relengapi.blueprints.slaveloan || not_ok "pep8 failed"
+pep8 --config=pep8rc ../slaveloan/relengapi || not_ok "pep8 (slaveloan) failed"
 
 status "running pylint"
 pylint relengapi --rcfile=pylintrc || not_ok "pylint failed"
 
 status "running pylint -- slaveloan"
-pylint slaveloan/relengapi --rcfile=pylintrc || not_ok "pylint failed"
+pylint ../slaveloan/relengapi --rcfile=pylintrc || not_ok "pylint (slaveloan) failed"
 
 status "building docs"
 relengapi build-docs || not_ok "build-docs failed"
