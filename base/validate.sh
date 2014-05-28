@@ -15,14 +15,8 @@ trap 'rm -f ${tmpbase}; exit 1' 1 2 3 15
 status "running pep8"
 pep8 --config=pep8rc relengapi || not_ok "pep8 failed"
 
-status "running pep8 -- slaveloan"
-pep8 --config=pep8rc ../slaveloan/relengapi || not_ok "pep8 (slaveloan) failed"
-
 status "running pylint"
 pylint relengapi --rcfile=pylintrc || not_ok "pylint failed"
-
-status "running pylint -- slaveloan"
-pylint ../slaveloan/relengapi --rcfile=pylintrc || not_ok "pylint (slaveloan) failed"
 
 status "building docs"
 relengapi build-docs || not_ok "build-docs failed"
