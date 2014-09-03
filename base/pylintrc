@@ -53,6 +53,8 @@ disable=
   arguments-differ,
   abstract-class-little-used,
   no-member,
+  too-many-branches,
+  too-many-locals,
 
 [REPORTS]
 
