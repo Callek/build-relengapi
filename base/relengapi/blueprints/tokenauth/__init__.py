@@ -8,14 +8,16 @@ import logging
 import sqlalchemy as sa
 from flask import g
 from flask import Blueprint
+from flask import url_for
 from flask import current_app
-from flask import render_template
 from flask.ext.login import login_required
 from flask.ext.login import current_user
 from relengapi import p
 from relengapi import apimethod
 from relengapi.lib import permissions
 from relengapi.lib import auth
+from relengapi.lib import api
+from relengapi.lib import angular
 from itsdangerous import JSONWebSignatureSerializer, BadData
 from werkzeug.exceptions import BadRequest
 from werkzeug.exceptions import NotFound
@@ -105,10 +107,9 @@ class JsonToken(wsme.types.Base):
 @bp.route('/')
 @login_required
 def root():
-    available_permissions = sorted((str(a), a.__doc__)
-                                   for a in current_user.permissions)
-    return render_template('new-token.html',
-                           available_permissions=available_permissions)
+    return angular.template('tokens.html',
+                            url_for('.static', filename='tokens.js'),
+                            tokens=api.get_data(list_tokens))
 
 
 @bp.route('/tokens')

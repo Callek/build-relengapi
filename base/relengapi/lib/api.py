@@ -21,24 +21,7 @@ from relengapi import util
 from werkzeug.exceptions import HTTPException, BadRequest
 
 
-class Handler(object):
-
-    def _parse_result(self, result):
-        code = 200
-        headers = {}
-        if isinstance(result, tuple):
-            if len(result) == 2:
-                if isinstance(result[1], dict):
-                    result, headers = result
-                else:
-                    result, code = result
-            else:
-                result, code, headers = result
-            assert 200 <= code < 299
-        return result, code, headers
-
-
-class JsonHandler(Handler):
+class JsonHandler(object):
 
     """Handler for requests accepting application/json."""
     media_type = 'application/json'
@@ -73,7 +56,7 @@ class JsonHandler(Handler):
         return resp
 
 
-class HtmlHandler(Handler):
+class HtmlHandler(object):
 
     """Handler for requests accepting text/html"""
     media_type = 'text/html'
@@ -104,6 +87,10 @@ def apimethod(return_type, *arg_types, **options):
 
         @functools.wraps(wrapped)
         def replacement(*args, **kwargs):
+            data_only = kwargs.pop('_data_only_', False)
+            if data_only:
+                return wrapped(*args, **kwargs)
+
             try:
                 args, kwargs = wsme.rest.args.get_args(
                     funcdef, args, kwargs,
@@ -129,7 +116,8 @@ def apimethod(return_type, *arg_types, **options):
                     result, code, headers = result
                 assert 200 <= code < 299
 
-            # convert the objects into jsonable simple types
+            # convert the objects into jsonable simple types, also checking
+            # the type at the same time
             result = wsme.rest.json.tojson(funcdef.return_type, result)
 
             # and hand to render_response, which will actually
@@ -139,6 +127,21 @@ def apimethod(return_type, *arg_types, **options):
         replacement.__apidoc__ = wrapped.__doc__
         return replacement
     return wrap
+
+
+def get_data(view_func, *args, **kwargs):
+    kwargs['_data_only_'] = True
+    # flag this as a subrequest, so that is_browser returns False
+    request.is_subrequest = True
+    try:
+        rv = view_func(*args, **kwargs)
+    finally:
+        del request.is_subrequest
+    if isinstance(rv, werkzeug.Response):
+        # this generally indicates that some other decorator decided to handle
+        # making the response itself -- at any rate, not what we want!
+        raise ValueError("cannot access data required for page")
+    return rv
 
 
 def init_app(app):
@@ -153,3 +156,18 @@ def init_app(app):
     # always trap http exceptions; the HTML handler will render them
     # as expected, but the JSON handler needs its chance, too
     app.trap_http_exception = lambda e: True
+
+    # create a new subclass of the current json_encoder, that can handle
+    # encoding WSME types
+    old_json_encoder = app.json_encoder
+
+    class WSMEEncoder(old_json_encoder):
+
+        """A mixin for JSONEncoder which can handle WSME types"""
+
+        def default(self, o):
+            if isinstance(o, wsme.types.Base):
+                return wsme.rest.json.tojson(type(o), o)
+            return old_json_encoder.default(self, o)
+
+    app.json_encoder = WSMEEncoder

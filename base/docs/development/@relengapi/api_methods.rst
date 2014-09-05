@@ -69,6 +69,17 @@ To return a success code other than 200 or include headers, simply return a tupl
     Returns a decorator for API methods as described above.
     The arguments are those for WSME's @\ signature_ decorator.
 
+
+Non-REST Endpoints
+..................
+
+Sometimes endpoints don't take or return JSON documents.
+For user convenience, this should be minimized.
+
+In cases where this is necessary, the ``apimethod`` decorator can't be used.
+Instead, your view function must do any encoding, decoding, and error handling itself.
+See below for help documenting such endpoints.
+
 Exceptions
 ----------
 
@@ -80,6 +91,8 @@ However, when the request does not specify ``text/html``, the exception is encod
 HTTP Errors again have the appropriate status code, while other exceptions are treated as 500 ISE's.
 The ``error`` key of the returned JSON contains keys ``code``, ``name``, and ``description``.
 When debugging is enabled, the exception information also contains a ``traceback`` key.
+
+.. _api-documentation:
 
 Documentation
 -------------
@@ -145,6 +158,38 @@ Similarly, endpoints are referenced using their Flask endpoint name, e.g.,
 .. code-block:: none
 
     Use :api:endpoint:`tokenauth.issue_token` to issue tokens.
+
+Non-REST Endpoints
+..................
+
+Endpoints which aren't sufficiently RESTful to be automatically documented can be described with the ``endpoint`` directive:
+
+.. code-block:: none
+
+    .. endpoint:: endpoint.name
+        POST /foo/<name>
+        PATCH /foo/<name>
+
+        :param name: name of the foo
+        :body: foo document
+        :response: updated foo document
+
+        Update or set the contents of a Foo.
+        With PATCH, the new and existing foo documents will be merged.
+
+The first argument is the name of the endpoint (usually the dotted combination of the blueprint and function name).
+The remaining arguments alternate between method names and paths.
+
+The docfields are ``param`` for request parameters, ``body`` for the request body, and ``response`` for the response body.
+
+Getting Data
+------------
+
+If you need the data from an API method (e.g., to pass it to an :ref:`Angular template <angular-templates>`), pass the view function to :py:func:`relengapi.lib.api.get_data`, passing additional arguments as necessary. ::
+
+    widget_info = api.get_data(get_widgets, widget_id)
+
+This function will raise an exception if the current request does not have proper permission.
 
 .. _WSME: http://wsme.readthedocs.org/
 .. _signature: http://wsme.readthedocs.org/en/latest/api.html#wsme.signature
