@@ -11,10 +11,10 @@ import wsme.types
 from flask import Flask
 from flask import g
 from flask import render_template
-from relengapi import db
 from relengapi.lib import api
 from relengapi.lib import auth
 from relengapi.lib import celery
+from relengapi.lib import db
 from relengapi.lib import layout
 from relengapi.lib import monkeypatches
 from relengapi.lib import permissions
@@ -39,12 +39,19 @@ def get_blueprints():
     # methods are called
     global _blueprints
     if not _blueprints:
-        entry_points = pkg_resources.iter_entry_points('relengapi_blueprints')
-        _blueprints = [(ep.name, ep.load()) for ep in entry_points]
+        # TODO: warn if relengapi_blueprints is used
+        entry_points = (list(pkg_resources.iter_entry_points('relengapi_blueprints'))
+                        + list(pkg_resources.iter_entry_points('relengapi.blueprints')))
+        _blueprints = []
+        for ep in entry_points:
+            bp = ep.load()
+            bp.dist = ep.dist
+            _blueprints.append(bp)
     return _blueprints
 
 
 class BlueprintInfo(wsme.types.Base):
+
     "Information about an installed Blueprint"
 
     #: Python distribution containing this blueprint
@@ -55,6 +62,7 @@ class BlueprintInfo(wsme.types.Base):
 
 
 class DistributionInfo(wsme.types.Base):
+
     "Information about an installed Python distribution"
 
     #: Name of the distribution
@@ -65,6 +73,7 @@ class DistributionInfo(wsme.types.Base):
 
 
 class VersionInfo(wsme.types.Base):
+
     "Information about installed software versions"
 
     #: All installed Python distributions, by ``project_name``
@@ -74,14 +83,25 @@ class VersionInfo(wsme.types.Base):
     blueprints = {unicode: BlueprintInfo}
 
 
+def apply_default_config(app):
+    logger.warning("using an in-memory database; data will be lost on restart")
+    app.config['SQLALCHEMY_DATABASE_URIS'] = dict(relengapi='sqlite:///')
+
+
 def create_app(cmdline=False, test_config=None):
     blueprints = get_blueprints()
 
     app = Flask(__name__)
+    env_var = 'RELENGAPI_SETTINGS'
     if test_config:
         app.config.update(**test_config)
     else:
-        app.config.from_envvar('RELENGAPI_SETTINGS')
+        if env_var in os.environ and os.environ[env_var]:
+            app.config.from_envvar(env_var)
+        else:
+            logger.warning("using default settings; to configure relengapi, set "
+                           "%s to point to your settings file" % env_var)
+            apply_default_config(app)
 
     # add the necessary components to the app
     app.db = db.make_db(app)
@@ -90,10 +110,12 @@ def create_app(cmdline=False, test_config=None):
     auth.init_app(app)
     api.init_app(app)
 
-    for name, bp in blueprints:
+    app.relengapi_blueprints = {}
+    for bp in blueprints:
         if cmdline:
-            logger.info("registering blueprint %s", name)
-        app.register_blueprint(bp, url_prefix='/%s' % name)
+            logger.info("registering blueprint %s", bp.name)
+        app.register_blueprint(bp, url_prefix='/%s' % bp.name)
+        app.relengapi_blueprints[bp.name] = bp
 
     # set up a random session key if none is specified
     if not app.config.get('SECRET_KEY'):
@@ -112,7 +134,8 @@ def create_app(cmdline=False, test_config=None):
         for bp in app.blueprints.itervalues():
             bp_widgets.extend(bp.root_widget_templates or [])
         bp_widgets.sort()
-        bp_widgets = [tpl for (_, tpl, condition) in bp_widgets if not condition or condition()]
+        bp_widgets = [
+            tpl for (_, tpl, condition) in bp_widgets if not condition or condition()]
         return render_template('root.html', bp_widgets=bp_widgets)
 
     @app.route('/versions')
@@ -123,9 +146,9 @@ def create_app(cmdline=False, test_config=None):
             dists[dist.key] = DistributionInfo(project_name=dist.project_name,
                                                version=dist.version)
         blueprints = {}
-        for ep in pkg_resources.iter_entry_points('relengapi_blueprints'):
-            blueprints[ep.name] = BlueprintInfo(distribution=ep.dist.key,
-                                                version=ep.dist.version)
+        for bp in app.relengapi_blueprints.itervalues():
+            blueprints[bp.name] = BlueprintInfo(distribution=bp.dist.key,
+                                                version=bp.dist.version)
         return VersionInfo(distributions=dists, blueprints=blueprints)
 
     return app

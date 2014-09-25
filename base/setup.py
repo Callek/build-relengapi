@@ -74,7 +74,7 @@ setup(
         ],
     },
     entry_points={
-        "relengapi_blueprints": [
+        "relengapi.blueprints": [
             'base = relengapi.blueprints.base:bp',
             'auth = relengapi.blueprints.auth:bp',
             'tokenauth = relengapi.blueprints.tokenauth:bp',
@@ -90,7 +90,7 @@ setup(
             'ldap-groups = relengapi.lib.auth.ldap_group_authz:init_app',
         ],
         "console_scripts": [
-            'relengapi = relengapi.subcommands:main',
+            'relengapi = relengapi.lib.subcommands:main',
         ],
     },
     license='MPL2',
