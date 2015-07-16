@@ -4,6 +4,8 @@
 
 import re
 
+from relengapi.blueprints.slaveloan.model import Loans
+
 # Todo this mapping REALLY needs a non-hardcoded home
 _slave_type = {
     "bld-linux64-ec2": [
