@@ -115,3 +115,30 @@ def slavetype_to_awsprefix(slave_class):
     else:
         raise ValueError("Unsure how to name this aws slave")
     return loan_prefix
+
+
+def get_aws_disambig(user_shortname, prefix):
+    bare_name = prefix + "-" + user_shortname
+    similar_loans = Loans.query \
+                         .filter(Loans.machine_id == Machines.id) \
+                         .filter(Machines.fqdn.like(bare_name + "%")) \
+                         .filter(~Loans.status.in_(["COMPLETE"])) \
+                         .order_by(Machines.fqdn.desc())
+    if similar_loans.count():
+        existing_aws_loan = similar_loans.first().machine.fqdn
+        shortname = existing_aws_loan.split(".")[0]
+        return str(int(shortname[len(bare_name):])) + 1
+    else:
+        return ""
+
+
+def name_aws_loan(loanid, loan_class):
+    # We use foo-$user_shortname$N where $N is optional only if
+    # there exists another active loan with the foo-$user prefix
+    l = Loans.query.get(loanid)
+    user_shortname = l.human.ldap.split("@")[0]
+    prefix = slave_mappings.slavetype_to_awsprefix(loan_class)
+    disambig = get_aws_disambig(user_shortname, prefix)
+    bare_name = prefix + "-" + user_shortname
+    this_name = bare_name + disambig
+    return this_name

@@ -39,10 +39,11 @@ def generate_loan(slavetype, loanid):
 def prep_machine_info(slavetype, loanid):
     if slave_mappings.is_aws_serviceable(slavetype):
         return chain(
-            manual_action(loanid=loanid, action_name="create_aws_system"),
-            manual_action(loanid=loanid, action_name="add_to_vpn"),
+            manual_action(loanid=loanid, action_name="create_aws_cname", extra={slavetype: slavetype}),
             tasks.choose_aws_machine.si(loanid=loanid, loan_class=slavetype),
             group(
+                manual_action(loanid=loanid, action_name="create_aws_system"),
+                manual_action(loanid=loanid, action_name="add_to_vpn"),
                 tasks.fixup_machine.s(loanid=loanid),
                 tasks.bmo_set_tracking_bug.s(loanid=loanid),
             )
@@ -81,9 +82,9 @@ def disable_machine_from_buildbot(slavetype, loanid):
         )
 
 
-def manual_action(loanid, action_name):
+def manual_action(loanid, action_name, extra=None):
     return chain(
-        tasks.register_action_needed.si(loanid=loanid, action_name=action_name),
+        tasks.register_action_needed.si(loanid=loanid, action_name=action_name, extra=extra),
         tasks.waitfor_action.s(loanid=loanid)
     )
 

@@ -89,23 +89,7 @@ def choose_inhouse_machine(self, loanid, loan_class):
     after="Chose aws machine {retval!s}")
 def choose_aws_machine(self, loanid, loan_class):
     logger.debug("Choosing aws machine name")
-    # We use foo-$user_shortname$N where $N is optional only if
-    # there exists another active loan with the foo-$user prefix
-    l = Loans.query.get(loanid)
-    prefix = slave_mappings.slavetype_to_awsprefix(loan_class)
-    user_shortname = l.human.ldap.split("@")[0]
-    bare_name = prefix + "-" + user_shortname
-    similar_loans = Loans.query \
-                         .filter(Loans.machine_id == Machines.id) \
-                         .filter(Machines.fqdn.like(bare_name + "%")) \
-                         .filter(~Loans.status.in_(["COMPLETE"])) \
-                         .order_by(Machines.fqdn.desc())
-    if similar_loans.count():
-        existing_aws_loan = similar_loans.first().machine.fqdn
-        shortname = existing_aws_loan.split(".")[0]
-        this_name = bare_name + str(int(shortname[len(bare_name):])) + 1
-    else:
-        this_name = bare_name
+    this_name = slave_mappings.name_aws_loan(loanid, loan_class)
     logger.debug("Chosen Slave Name = %s" % this_name)
     return this_name
 
@@ -216,7 +200,7 @@ def bmo_file_loan_bug(self, loanid, slavetype, *args, **kwargs):
 @task(bind=True)
 @add_to_history(
     after="Waiting for a human to perform {kwargs[action_name]} (id {retval!s})")
-def register_action_needed(self, loanid, action_name):
+def register_action_needed(self, loanid, action_name, extra=None):
     if not action_name:
         raise ValueError("must supply an action name")
     try:
@@ -234,6 +218,16 @@ def register_action_needed(self, loanid, action_name):
                 " Following "
                 "https://wiki.mozilla.org/ReleaseEngineering/How_To/Loan_a_Slave#AWS_machines"
                 % (l.human.ldap,)
+            )
+        elif action_name == "create_aws_cname":
+            if not extra:
+                raise ValueError("Expected 'extra' parameter for slavetype")
+            name = slave_mappings.name_aws_loan(loanid, extra['slavetype'])
+            action_message = (
+                "Create a CNAME record for slave '%s'."
+                " Following "
+                "https://wiki.mozilla.org/ReleaseEngineering/How_To/Loan_a_Slave#AWS_machines_CNAME"
+                % (name,)
             )
         elif action_name == "clean_secrets":
             action_message = (
