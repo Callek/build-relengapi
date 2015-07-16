@@ -40,7 +40,7 @@ def prep_machine_info(slavetype, loanid):
     if slave_mappings.is_aws_serviceable(slavetype):
         return chain(
             manual_action(loanid=loanid, action_name="create_aws_cname",
-                          extra={slavetype: slavetype}),
+                          extra={"slavetype": slavetype}),
             tasks.choose_aws_machine.si(loanid=loanid, loan_class=slavetype),
             group(
                 manual_action(loanid=loanid, action_name="create_aws_system"),
