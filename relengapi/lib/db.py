@@ -7,6 +7,7 @@ from __future__ import absolute_import
 import logging
 import os
 import threading
+import uuid
 
 import pytz
 import sqlalchemy as sa
@@ -212,6 +213,29 @@ class UTCDateTime(types.TypeDecorator):
         # We expect UTC dates back, so populate with tzinfo
         if value is not None:
             return value.replace(tzinfo=pytz.UTC)
+
+
+class UUIDColumn(types.TypeDecorator):
+    impl = types.VARBINARY(16)
+
+    def process_bind_param(self, value, dialect):
+        bytes_insert = None
+        if value is not None:
+            if isinstance(value, basestring):
+                # Convert value to uuid (sanity checks it)
+                value = uuid.UUID(value)
+            elif isinstance(value, (int, long)):
+                value = uuid.UUID(int=value)
+            if isinstance(value, uuid.UUID):
+                bytes_insert = value.bytes
+            else:
+                raise ValueError("Unexpected Value for UUIDColumn: %s" % repr(value))
+        return bytes_insert
+
+    def process_result_value(self, value, dialect):
+        # We pass back a uuid object
+        if value is not None:
+            return uuid.UUID(bytes=value)
 
 
 def _unique(session, cls, hashfunc, queryfunc, constructor, arg, kw, _test_hook=None):

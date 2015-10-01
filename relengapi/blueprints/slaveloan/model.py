@@ -64,6 +64,8 @@ class Loans(db.declarative_base('relengapi')):
     id = sa.Column(sa.Integer, primary_key=True)
     status = sa.Column(sa.String(50), nullable=False)
     bug_id = sa.Column(sa.Integer, nullable=True)
+    requested_machine = sa.Column(sa.String(255), nullable=True)
+    state = sa.Column(sa.String(50), nullable=True)
     human_id = sa.Column(sa.Integer,
                          sa.ForeignKey(_tbl_prefix + 'humans.id'),
                          nullable=False)
@@ -72,6 +74,8 @@ class Loans(db.declarative_base('relengapi')):
                            nullable=True)
     history = relationship("History", backref="for_loan")
     manual_actions = relationship("ManualActions", backref="for_loan")
+    tasks = relationship("Tasks", backref="for_loan")
+
     # Backrefs
     # # human   (Humans)
     # # machine (Machines)
@@ -141,3 +145,22 @@ class ManualActions(db.declarative_base('relengapi')):
 
     def to_wsme(self):
         return rest.ManualAction(**self.to_json())
+
+
+class Tasks(db.declarative_base('relengapi')):
+    __tablename__ = _tbl_prefix + 'tasks'
+    id = sa.Column(db.UUIDColumn,
+                   nullable=False,
+                   primary_key=True)
+    loan_id = sa.Column(sa.Integer,
+                        sa.ForeignKey(_tbl_prefix + 'loans.id'),
+                        nullable=False)
+    name = sa.Column(sa.Text, nullable=False)
+    argsJson = sa.Column(sa.Text, nullable=True)
+    status = sa.Column(sa.Text, nullable=True)
+    status_timestamp = sa.Column(db.UTCDateTime(timezone=True),
+                                 default=tz.utcnow,
+                                 nullable=False)
+
+    # Backrefs
+    # # for_loan  (Loan this applies to)

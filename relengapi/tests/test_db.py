@@ -6,6 +6,7 @@ from __future__ import absolute_import
 
 import datetime
 import os
+import uuid
 
 import pytz
 import sqlalchemy as sa
@@ -39,6 +40,7 @@ class DevTable(db.declarative_base('test_db')):
     __tablename__ = 'users'
     id = sa.Column(sa.Integer, primary_key=True)
     date = sa.Column(db.UTCDateTime(timezone=True))
+    uuid = sa.Column(db.UUIDColumn)
 
 
 @TestContext()
@@ -149,6 +151,104 @@ def test_UTCDateTime_converts_standard(app):
     ok_(isinstance(instances[0].date, datetime.datetime))
     eq_(instances[0].date.strftime('%Y-%m-%d %H:%M:%S %Z%z'),
         '2011-11-27 10:00:00 UTC+0000')
+
+
+@TestContext(databases=['test_db'])
+def test_UUIDColumn_null(app):
+    session = app.db.session('test_db')
+    session.add(DevTable(uuid=None))
+    session.commit()
+    instances = session.query(DevTable).all()
+    eq_(1, len(instances))
+    eq_(instances[0].uuid, None)
+
+
+@TestContext(databases=['test_db'])
+def test_UUIDColumn_insert_int(app):
+    session = app.db.session('test_db')
+    session.add(DevTable(uuid=1))
+    session.commit()
+    instances = session.query(DevTable).all()
+    eq_(1, len(instances))
+    ok_(isinstance(instances[0].uuid, uuid.UUID))
+    eq_(instances[0].uuid.int, 1L)
+
+
+@TestContext(databases=['test_db'])
+def test_UUIDColumn_insert_long(app):
+    session = app.db.session('test_db')
+    session.add(DevTable(uuid=335299852398526937584550264678476722159L))
+    session.commit()
+    instances = session.query(DevTable).all()
+    eq_(1, len(instances))
+    ok_(isinstance(instances[0].uuid, uuid.UUID))
+    eq_(instances[0].uuid.int, 335299852398526937584550264678476722159L)
+
+
+@TestContext(databases=['test_db'])
+def test_UUIDColumn_insert_string(app):
+    for uid in ['FC406711-5651-4723-8F73-7B0D76CCAFEF',
+                'fc406711-5651-4723-8f73-7b0d76ccafef',
+                'fc406711565147238f737b0d76ccafef',
+                'FC406711565147238F737B0D76CCAFEF']:
+        for fmt in [('{', '}'),
+                    ('', '')]:
+            session = app.db.session('test_db')
+            session.add(DevTable(uuid=(fmt[0] + uid + fmt[1])))
+            session.commit()
+    instances = session.query(DevTable).all()
+    eq_(8, len(instances))
+    for instance in instances:
+        ok_(isinstance(instance.uuid, uuid.UUID))
+        eq_(instance.uuid.int, 335299852398526937584550264678476722159L)
+
+
+@TestContext(databases=['test_db'])
+def test_UUIDColumn_insert_uuid_object(app):
+    session = app.db.session('test_db')
+    session.add(DevTable(uuid=uuid.UUID("{fc406711565147238f737b0d76ccafef}")))
+    session.commit()
+    instances = session.query(DevTable).all()
+    eq_(1, len(instances))
+    ok_(isinstance(instances[0].uuid, uuid.UUID))
+    eq_(instances[0].uuid.int, 335299852398526937584550264678476722159L)
+
+
+@TestContext(databases=['test_db'])
+def test_UUIDColumn_invalid_object(app):
+    session = app.db.session('test_db')
+    with assert_raises(sa.exc.StatementError) as cm:
+        session.add(DevTable(uuid=object()))
+        session.commit()
+    session.rollback()
+    ok_(isinstance(cm.exception.orig, ValueError))
+    instances = session.query(DevTable).all()
+    eq_(0, len(instances))
+
+
+@TestContext(databases=['test_db'])
+def test_UUIDColumn_invalid_string(app):
+    session = app.db.session('test_db')
+    with assert_raises(sa.exc.StatementError) as cm:
+        session.add(DevTable(uuid="invalid"))
+        session.commit()
+    session.rollback()
+    ok_(isinstance(cm.exception.orig, ValueError))
+    instances = session.query(DevTable).all()
+    eq_(0, len(instances))
+
+
+@TestContext(databases=['test_db'])
+def test_UUIDColumn_invalid_int(app):
+    "Integer is out of range for a UUID"
+    session = app.db.session('test_db')
+    with assert_raises(sa.exc.StatementError) as cm:
+        session.add(DevTable(uuid=340282366920938463463374607431768211480L))
+        session.commit()
+    session.rollback()
+    ok_(isinstance(cm.exception.orig, ValueError))
+    instances = session.query(DevTable).all()
+    eq_(0, len(instances))
 
 
 class Uniqueness_Table(db.declarative_base('test_db'), db.UniqueMixin):

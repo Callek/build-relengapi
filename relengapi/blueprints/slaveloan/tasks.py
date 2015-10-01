@@ -12,10 +12,12 @@ import bzrest
 import celery
 import requests
 import structlog
+from celery import Task
 from flask import current_app
 from furl import furl
 from redo import retry
 from requests import RequestException
+import wrapt
 
 from relengapi.blueprints.slaveloan import bugzilla
 from relengapi.blueprints.slaveloan import slave_mappings
@@ -23,6 +25,10 @@ from relengapi.blueprints.slaveloan.model import History
 from relengapi.blueprints.slaveloan.model import Loans
 from relengapi.blueprints.slaveloan.model import Machines
 from relengapi.blueprints.slaveloan.model import ManualActions
+from relengapi.blueprints.slaveloan.model import Tasks
+from relengapi.blueprints.slaveloan.task_groups2 import has_incomplete_tasks
+from relengapi.blueprints.slaveloan.task_groups2 import maybe_retry_tasks
+from relengapi.lib import badpenny
 from relengapi.lib.celery import task
 from relengapi.util import tz
 
@@ -58,13 +64,64 @@ def add_to_history(before=None, after=None):
     return decorator
 
 
+def report_task_state(state, loanid, abort_if=None):
+    if state not in ["RETRYING", "FAILURE", "RUNNING", "SUCCESS"]:
+        raise ValueError("Unexpected state %s" % (state,))
+    session = current_app.db.session('relengapi')
+    task_id = celery.current_task.request.id
+    t = session.query(Tasks).filter(Tasks.id == task_id).all()
+    if not t:
+        logger.debug("Creating Task: %s" % celery.current_task.request.id)
+        task = Tasks(id=task_id,
+                     loan_id=loanid,
+                     name=celery.current_task.name,
+                     status_timestamp=tz.utcnow())
+    else:
+        logger.debug("Not creating task")
+        task = t[0]
+        if abort_if and task.status in abort_if:
+            raise Exception("Integrity Error, State should not be %s" % task.status)
+        logger.debug(repr(task))
+        if len(t) != 1:
+            raise Exception("Unknown Error too many objects")
+    task.status = state
+    task.status_timestamp = tz.utcnow()
+    session.add(task)
+    session.commit()
+
+
+def reporting_task(before=None, after=None):
+    @wrapt.decorator
+    def wrapper(wrapped, instance, args, kwargs):
+        bound_task = None
+        loanid = kwargs.get("loanid", None)
+        report_task_state("RUNNING", loanid, abort_if=["RUNNING"])
+        bound_task = celery.current_task
+        if before:
+            add_task_to_history(loanid, before.format(**locals()))
+        try:
+            retval = wrapped(*args, **kwargs)
+        except Exception as exc:
+            try:
+                report_task_state("FAILURE", loanid)
+            except:
+                pass
+            logger.exception(exc)
+            #  self.retry(exc=exc)
+        if after:
+            add_task_to_history(loanid, after.format(**locals()))
+        return retval
+    return wrapper
+
+
 @task(bind=True)
-@add_to_history(
+@reporting_task(
     before="Choosing an inhouse machine based on slavealloc",
     after="Chose inhouse machine {retval!s}")
 def choose_inhouse_machine(self, loanid, loan_class):
     logger.debug("Choosing inhouse machine")
     url = furl(current_app.config.get("SLAVEALLOC_URL", None))
+    raise Exception()
     # XXX: ToDo raise fatal if no slavealloc
     url.path.add("slaves")
     url.args["enabled"] = 1
@@ -83,7 +140,7 @@ def choose_inhouse_machine(self, loanid, loan_class):
 
 
 @task(bind=True)
-@add_to_history(
+@reporting_task(
     before="Identifying aws machine name to use",
     after="Chose aws machine {retval!s}")
 def choose_aws_machine(self, loanid, loan_class):
@@ -110,7 +167,7 @@ def choose_aws_machine(self, loanid, loan_class):
 
 
 @task(bind=True, max_retries=None)
-@add_to_history(
+@reporting_task(
     before="Identifying FQDN and IP of {args[1]}",
     after="Acquired FQDN and IP")
 def fixup_machine(self, machine, loanid):
@@ -135,7 +192,7 @@ def fixup_machine(self, machine, loanid):
 
 
 @task(bind=True)
-@add_to_history(
+@reporting_task(
     before="Setup tracking bug for {args[1]}",
     after="Tracking bug {retval!s} linked with loan")
 def bmo_set_tracking_bug(self, machine, loanid):
@@ -170,7 +227,7 @@ def bmo_set_tracking_bug(self, machine, loanid):
 
 
 @task(bind=True, max_retries=None)
-@add_to_history(
+@reporting_task(
     before="Disabling in slavealloc (via slaveapi)",
     after="Disable request sent to slavealloc (via slaveapi)")
 def slavealloc_disable(self, machine, loanid):
@@ -187,7 +244,7 @@ def slavealloc_disable(self, machine, loanid):
 
 
 @task(bind=True)
-@add_to_history(
+@reporting_task(
     before="Filing the loan bug if needed",
     after="Loan is tracked in bug {retval!s}")
 def bmo_file_loan_bug(self, loanid, slavetype, *args, **kwargs):
@@ -213,7 +270,7 @@ def bmo_file_loan_bug(self, loanid, slavetype, *args, **kwargs):
 
 
 @task(bind=True)
-@add_to_history(
+@reporting_task(
     after="Waiting for a human to perform {kwargs[action_name]} (id {retval!s})")
 def register_action_needed(self, loanid, action_name):
     if not action_name:
@@ -269,7 +326,7 @@ def register_action_needed(self, loanid, action_name):
 
 
 @task(bind=True, max_retries=None, default_retry_delay=60)
-@add_to_history(
+@reporting_task(
     after="Noticed that a human performed pending action (id {args[1]}), continuing")
 def waitfor_action(self, action_id, loanid):
     try:
@@ -282,7 +339,7 @@ def waitfor_action(self, action_id, loanid):
 
 
 @task(bind=True, max_retries=None)
-@add_to_history(
+@reporting_task(
     before="Calling slaveapi's disable method to disable from buildbot",
     after="Disable request sent")
 def start_disable_slave(self, machine, loanid):
@@ -297,7 +354,7 @@ def start_disable_slave(self, machine, loanid):
 
 
 @task(bind=True, max_retries=None)
-@add_to_history(
+@reporting_task(
     after="Noticed that machine was disabled (or waiting timed out)")
 def waitfor_disable_slave(self, data, loanid):
     requestid, machine = data
@@ -314,7 +371,7 @@ def waitfor_disable_slave(self, data, loanid):
 
 
 @task(bind=True, max_retries=None)
-@add_to_history(
+@reporting_task(
     after="Marked loan as ACTIVE")
 def mark_loan_status(self, loanid, status):
     try:
@@ -335,3 +392,20 @@ bmo_waitfor_bug = dummy_task
 clean_secrets = dummy_task
 update_loan_bug_with_details = dummy_task
 email_loan_details = dummy_task
+
+@task()
+@reporting_task()
+def testing_task(self, *args, **kwargs):
+    logger.debug(repr(self))
+    pass
+
+
+@badpenny.periodic_task(seconds=600)
+def reschedule_abandoned_jobs(job_status):
+    loans = Loans.query.filter(Loans.status != "COMPLETE").all()
+    retried = 0
+    for l in loans:
+        if has_incomplete_tasks(l.id):
+            retried += maybe_retry_tasks(l.id)
+    if not retried:
+        job_status.log_message("All is well, no tasks retried")
