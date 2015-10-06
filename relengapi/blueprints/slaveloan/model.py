@@ -134,7 +134,7 @@ class ManualActions(db.declarative_base('relengapi')):
     # Backrefs
     # # for_loan  (Loan this applies to)
 
-    __table_args__ = (Index("loan_id_idx", "loan_id"), )
+    __table_args__ = (Index("slaveloan_actions_loan_id_idx", "loan_id"), )
 
     def to_json(self):
         return dict(id=self.id, loan_id=self.loan_id,
@@ -147,7 +147,7 @@ class ManualActions(db.declarative_base('relengapi')):
         return rest.ManualAction(**self.to_json())
 
 
-class Tasks(db.declarative_base('relengapi')):
+class Tasks(db.declarative_base('relengapi'), db.UniqueMixin):
     __tablename__ = _tbl_prefix + 'tasks'
     id = sa.Column(db.UUIDColumn,
                    nullable=False,
@@ -164,3 +164,18 @@ class Tasks(db.declarative_base('relengapi')):
 
     # Backrefs
     # # for_loan  (Loan this applies to)
+
+    __table_args__ = (Index("slaveloan_task_loan_id_idx", "loan_id"), )
+
+    @classmethod
+    def unique_hash(cls, id, *args, **kwargs):
+        return id
+
+    @classmethod
+    def unique_filter(cls, query, id, *args, **kwargs):
+        return query.filter(Tasks.id == id)
+
+    def to_json(self):
+        return dict(id=str(self.id), loan_id=self.loan_id,
+                    name=self.name, argsJson=self.argsJson,
+                    status=self.status, status_timestamp=self.status_timestamp)

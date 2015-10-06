@@ -6,112 +6,25 @@ from __future__ import absolute_import
 
 import random
 import socket
-from functools import wraps
 
 import bzrest
-import celery
 import requests
 import structlog
-from celery import Task
 from flask import current_app
 from furl import furl
 from redo import retry
 from requests import RequestException
-import wrapt
 
 from relengapi.blueprints.slaveloan import bugzilla
 from relengapi.blueprints.slaveloan import slave_mappings
-from relengapi.blueprints.slaveloan.model import History
 from relengapi.blueprints.slaveloan.model import Loans
 from relengapi.blueprints.slaveloan.model import Machines
 from relengapi.blueprints.slaveloan.model import ManualActions
-from relengapi.blueprints.slaveloan.model import Tasks
-from relengapi.blueprints.slaveloan.task_groups2 import has_incomplete_tasks
-from relengapi.blueprints.slaveloan.task_groups2 import maybe_retry_tasks
-from relengapi.lib import badpenny
+from relengapi.blueprints.slaveloan.task_wrapper import reporting_task
 from relengapi.lib.celery import task
 from relengapi.util import tz
 
 logger = structlog.get_logger()
-
-
-def add_task_to_history(loanid, msg):
-    session = current_app.db.session('relengapi')
-    l = session.query(Loans).get(loanid)
-    history = History(for_loan=l,
-                      timestamp=tz.utcnow(),
-                      msg=msg)
-    session.add(history)
-    session.commit()
-    logger.debug("Log_line: %s" % msg)
-
-
-def add_to_history(before=None, after=None):
-    def decorator(f):
-        @wraps(f)
-        def wrapper(*args, **kwargs):
-            bound_task = None
-            loanid = kwargs.get("loanid", None)
-            if args and isinstance(args[0], celery.Task):
-                bound_task = args[0]
-            if before:
-                add_task_to_history(loanid, before.format(**locals()))
-            retval = f(*args, **kwargs)
-            if after:
-                add_task_to_history(loanid, after.format(**locals()))
-            return retval
-        return wrapper
-    return decorator
-
-
-def report_task_state(state, loanid, abort_if=None):
-    if state not in ["RETRYING", "FAILURE", "RUNNING", "SUCCESS"]:
-        raise ValueError("Unexpected state %s" % (state,))
-    session = current_app.db.session('relengapi')
-    task_id = celery.current_task.request.id
-    t = session.query(Tasks).filter(Tasks.id == task_id).all()
-    if not t:
-        logger.debug("Creating Task: %s" % celery.current_task.request.id)
-        task = Tasks(id=task_id,
-                     loan_id=loanid,
-                     name=celery.current_task.name,
-                     status_timestamp=tz.utcnow())
-    else:
-        logger.debug("Not creating task")
-        task = t[0]
-        if abort_if and task.status in abort_if:
-            raise Exception("Integrity Error, State should not be %s" % task.status)
-        logger.debug(repr(task))
-        if len(t) != 1:
-            raise Exception("Unknown Error too many objects")
-    task.status = state
-    task.status_timestamp = tz.utcnow()
-    session.add(task)
-    session.commit()
-
-
-def reporting_task(before=None, after=None):
-    @wrapt.decorator
-    def wrapper(wrapped, instance, args, kwargs):
-        bound_task = None
-        loanid = kwargs.get("loanid", None)
-        report_task_state("RUNNING", loanid, abort_if=["RUNNING"])
-        bound_task = celery.current_task
-        if before:
-            add_task_to_history(loanid, before.format(**locals()))
-        try:
-            retval = wrapped(*args, **kwargs)
-        except Exception as exc:
-            try:
-                report_task_state("FAILURE", loanid)
-            except:
-                pass
-            logger.exception(exc)
-            #  self.retry(exc=exc)
-        if after:
-            add_task_to_history(loanid, after.format(**locals()))
-        return retval
-    return wrapper
 
 
 @task(bind=True)
@@ -392,20 +305,3 @@ bmo_waitfor_bug = dummy_task
 clean_secrets = dummy_task
 update_loan_bug_with_details = dummy_task
 email_loan_details = dummy_task
-
-@task()
-@reporting_task()
-def testing_task(self, *args, **kwargs):
-    logger.debug(repr(self))
-    pass
-
-
-@badpenny.periodic_task(seconds=600)
-def reschedule_abandoned_jobs(job_status):
-    loans = Loans.query.filter(Loans.status != "COMPLETE").all()
-    retried = 0
-    for l in loans:
-        if has_incomplete_tasks(l.id):
-            retried += maybe_retry_tasks(l.id)
-    if not retried:
-        job_status.log_message("All is well, no tasks retried")
