@@ -11,7 +11,6 @@ import structlog
 import wrapt
 from flask import current_app
 from flask import json
-from sqlalchemy.exc import IntegrityError
 
 from relengapi.blueprints.slaveloan.model import History
 from relengapi.blueprints.slaveloan.model import Loans
