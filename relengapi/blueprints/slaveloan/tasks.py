@@ -20,7 +20,10 @@ from relengapi.blueprints.slaveloan import slave_mappings
 from relengapi.blueprints.slaveloan.model import Loans
 from relengapi.blueprints.slaveloan.model import Machines
 from relengapi.blueprints.slaveloan.model import ManualActions
+from relengapi.blueprints.slaveloan.task_groups2 import has_incomplete_tasks
+from relengapi.blueprints.slaveloan.task_groups2 import maybe_retry_tasks
 from relengapi.blueprints.slaveloan.task_wrapper import reporting_task
+from relengapi.lib import badpenny
 from relengapi.lib.celery import task
 from relengapi.util import tz
 
@@ -305,3 +308,14 @@ bmo_waitfor_bug = dummy_task
 clean_secrets = dummy_task
 update_loan_bug_with_details = dummy_task
 email_loan_details = dummy_task
+
+
+@badpenny.periodic_task(seconds=6)
+def reschedule_abandoned_jobs(job_status):
+    loans = Loans.query.filter(Loans.status != "COMPLETE").all()
+    retried = 0
+    for l in loans:
+        if has_incomplete_tasks(l.id):
+            retried += maybe_retry_tasks(l.id)
+    if not retried:
+        job_status.log_message("All is well, no tasks retried")

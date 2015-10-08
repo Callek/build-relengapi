@@ -5,10 +5,15 @@
 
 from __future__ import absolute_import
 
+import structlog
+from flask import current_app
+from flask import json
+
 from relengapi.blueprints.slaveloan.model import Loans
 from relengapi.blueprints.slaveloan.model import Tasks
-from relengapi.lib import badpenny
 from relengapi.util.tz import utcnow
+
+logger = structlog.get_logger()
 
 
 def next_tasks(loanid):
@@ -25,7 +30,8 @@ def next_tasks(loanid):
 
 
 def has_incomplete_tasks(loanid):
-    tasks = Tasks.query.filter(Tasks.for_loan == loanid).all()
+    logger.debug("loanid: %s" % repr(loanid))
+    tasks = Tasks.query.filter_by(loan_id=loanid).all()
     task_statuses = set([task.status for task in tasks])
     complete_statuses = set(['SUCCESS', 'FAILURE'])
     #  uses set() to check if any states not in above list are present
@@ -34,7 +40,7 @@ def has_incomplete_tasks(loanid):
 
 
 def maybe_retry_tasks(loanid):
-    tasks = Tasks.query.filter(Tasks.for_loan == loanid).all()
+    tasks = Tasks.query.filter_by(loan_id=loanid).all()
     retried_count = 0
     for t in tasks:
         if t.status in ['SUCCESS', 'FAILURE']:
@@ -44,21 +50,16 @@ def maybe_retry_tasks(loanid):
             if (utcnow() - dt).total_seconds() > 1800:
                 # Re-Kick the task if it has been pending for 30 minutes.
                 retried_count += 1
-
+                args, kwargs = json.loads(t.argsJson)
+                current_app.celery.send_task(
+                    name=t.name,
+                    args=args,
+                    kwargs=kwargs,
+                )
+            continue
         if t.status in ['RUNNING']:
             # XXX: Check if task has taken too long to run
-            #      based on expected runtime
-            pass
+            #      based on expected runtime and kill it
+            continue
         raise ValueError("Unexpected task status %s" % t.status)
     return retried_count
-
-
-@badpenny.periodic_task(seconds=600)
-def reschedule_abandoned_jobs(job_status):
-    loans = Loans.query.filter(Loans.status != "COMPLETE").all()
-    retried = 0
-    for l in loans:
-        if has_incomplete_tasks(l.id):
-            retried += maybe_retry_tasks(l.id)
-    if not retried:
-        job_status.log_message("All is well, no tasks retried")

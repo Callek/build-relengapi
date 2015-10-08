@@ -11,6 +11,7 @@ import structlog
 import wrapt
 from flask import current_app
 from flask import json
+from sqlalchemy.exc import IntegrityError
 
 from relengapi.blueprints.slaveloan.model import History
 from relengapi.blueprints.slaveloan.model import Loans
@@ -40,7 +41,8 @@ def update_task(session=None, task=None, **kwargs):
     session passed also for adding to the session)
 
     :Parameters:
-      - `session` (optional) an SQLAlchemy session object
+      - `session` (optional) an SQLAlchemy session object (in case of race condition
+                             in getting the task, may have a `rollback` issued)
       - `task` (optional) an ORM of an existing task object (created from kwargs) if missing
       - `\**kwargs\` - valid ORM attributes for the task object
 
@@ -50,7 +52,11 @@ def update_task(session=None, task=None, **kwargs):
     if not task:
         if not session:
             raise ValueError("Unable to query for task when not passed a session")
-        task = Tasks.as_unique(session, **kwargs)
+        try:
+            task = Tasks.as_unique(session, **kwargs)
+        except IntegrityError:  # Try Harder
+            session.rollback()
+            task = Tasks.as_unique(session, **kwargs)
     else:
         if ('id' in kwargs and task.id and
                 not id_to_uuid_object(kwargs['id']) == task.id):
@@ -106,14 +112,20 @@ def reporting_task(before=None, after=None):
             add_task_to_history(loanid, before.format(**locals()))
         try:
             retval = wrapped(*args, **kwargs)
+        except celery.exceptions.Retry as exc:
+            try:
+                report_task_state("RETRYING", loanid, argsJson=argsJson,
+                                  abort_if=lambda x: x not in ["RUNNING"])
+            except:
+                pass
+            raise
         except Exception as exc:
             try:
                 report_task_state("FAILURE", loanid, argsJson=argsJson,
                                   abort_if=lambda x: x not in ["RUNNING"])
             except:
                 pass
-            logger.exception(exc)
-            #  self.retry(exc=exc)
+            raise
         if after:
             add_task_to_history(loanid, after.format(**locals()))
         report_task_state("SUCCESS", loanid, argsJson=argsJson,
