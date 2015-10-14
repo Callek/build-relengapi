@@ -121,7 +121,8 @@ class ManualActions(db.declarative_base('relengapi')):
     id = sa.Column(sa.Integer, primary_key=True)
     loan_id = sa.Column(sa.Integer,
                         sa.ForeignKey(_tbl_prefix + 'loans.id'),
-                        nullable=False)
+                        nullable=False,
+                        index=True)
     timestamp_start = sa.Column(db.UTCDateTime(timezone=True),
                                 default=tz.utcnow,
                                 nullable=False)
@@ -133,8 +134,6 @@ class ManualActions(db.declarative_base('relengapi')):
 
     # Backrefs
     # # for_loan  (Loan this applies to)
-
-    __table_args__ = (Index("slaveloan_actions_loan_id_idx", "loan_id"), )
 
     def to_json(self):
         return dict(id=self.id, loan_id=self.loan_id,
@@ -154,7 +153,8 @@ class Tasks(db.declarative_base('relengapi'), db.UniqueMixin):
                    primary_key=True)
     loan_id = sa.Column(sa.Integer,
                         sa.ForeignKey(_tbl_prefix + 'loans.id'),
-                        nullable=False)
+                        nullable=False,
+                        index=True)
     name = sa.Column(sa.Text, nullable=False)
     argsJson = sa.Column(sa.Text, nullable=True)
     status = sa.Column(sa.Text, nullable=True)
@@ -164,8 +164,6 @@ class Tasks(db.declarative_base('relengapi'), db.UniqueMixin):
 
     # Backrefs
     # # for_loan  (Loan this applies to)
-
-    __table_args__ = (Index("slaveloan_task_loan_id_idx", "loan_id"), )
 
     @classmethod
     def unique_hash(cls, id, *args, **kwargs):

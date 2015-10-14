@@ -310,7 +310,7 @@ update_loan_bug_with_details = dummy_task
 email_loan_details = dummy_task
 
 
-@badpenny.periodic_task(seconds=6)
+@badpenny.periodic_task(seconds=600)
 def reschedule_abandoned_jobs(job_status):
     loans = Loans.query.filter(Loans.status != "COMPLETE").all()
     retried = 0
