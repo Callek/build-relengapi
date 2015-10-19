@@ -120,9 +120,6 @@ class State(object):
         else:
             logger.warning("ignored event %s in state %s" % (event, self.__class__.__name__))
 
-    def handle_timeout(self):
-        self.on_timeout()
-
     # hook methods
 
     def on_entry(self):
