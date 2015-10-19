@@ -6,7 +6,6 @@ from __future__ import absolute_import
 
 import sqlalchemy as sa
 from sqlalchemy.orm import relationship
-from sqlalchemy.schema import Index
 
 from relengapi.blueprints.slaveloan import rest
 from relengapi.lib import db
@@ -81,7 +80,7 @@ class Loans(db.declarative_base('relengapi')):
     # # machine (Machines)
 
     def to_json(self, sub_meth="to_json"):
-        if self.machine_id:
+        if self.machine:  # allows the sub-expansion when session not committed
             return dict(id=self.id, status=self.status, bug_id=self.bug_id,
                         human=getattr(self.human, sub_meth)(),
                         machine=getattr(self.machine, sub_meth)())

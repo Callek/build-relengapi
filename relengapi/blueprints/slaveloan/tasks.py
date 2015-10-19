@@ -20,8 +20,8 @@ from relengapi.blueprints.slaveloan import slave_mappings
 from relengapi.blueprints.slaveloan.model import Loans
 from relengapi.blueprints.slaveloan.model import Machines
 from relengapi.blueprints.slaveloan.model import ManualActions
-from relengapi.blueprints.slaveloan.task_groups2 import has_incomplete_tasks
-from relengapi.blueprints.slaveloan.task_groups2 import maybe_retry_tasks
+from relengapi.blueprints.slaveloan.statemachine import has_incomplete_tasks
+from relengapi.blueprints.slaveloan.statemachine import maybe_retry_tasks
 from relengapi.blueprints.slaveloan.task_wrapper import reporting_task
 from relengapi.lib import badpenny
 from relengapi.lib.celery import task
