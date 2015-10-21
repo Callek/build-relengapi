@@ -58,8 +58,6 @@ class StateMachine(object):
         finally:
             self.state = None
 
-    # virtual methods
-
     def read_state(self):
         return self.get_loan().state
 

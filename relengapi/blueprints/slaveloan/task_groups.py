@@ -10,6 +10,41 @@ from celery import group as group_
 
 from relengapi.blueprints.slaveloan import slave_mappings
 from relengapi.blueprints.slaveloan import tasks
+from relengapi.blueprints.slaveloan.statemachine import State
+from relengapi.blueprints.slaveloan.statemachine import StateMachine
+from relengapi.blueprints.slaveloan.task_utils import StatefulTaskMixin
+from relengapi.blueprints.slaveloan.task_wrapper import add_task_to_history
+
+
+# XXX Rename file to "states"
+
+@StateMachine.state_class
+class creating_aws_slave(State, StatefulTaskMixin):
+    def on_entry(self):
+        # XXX Start the task via a wrapper that stores it in Task DB
+        tasks.register_action_needed.si(loanid=self.machine.loanid,
+                                        action_name="create_aws_system")
+
+    def on_task_start(self, args):
+        log_line = ""
+        add_task_to_history(self.machine.loanid, log_line)
+
+    def on_task_ended(self, args):
+        if args['status'] == "SUCCESS":
+            log_line = "Waiting for a human to start the aws system for this loan."
+            add_task_to_history(self.machine.loanid, log_line)
+            self.machine.goto_state('waiting_for_aws_system')
+
+
+@StateMachine.state_class
+class waiting_for_aws_system(State):
+    def on_complete(self, args):
+        log_line = ""
+        if args['user']:
+            log_line += "%s " % args['user']
+        log_line += "Started the aws host for this loan (action id %s)." % args['action_id']
+        add_task_to_history(self.machine.loanid, log_line)
+        self.machine.goto_state('whatevers_next')
 
 
 def group(*args, **kwargs):

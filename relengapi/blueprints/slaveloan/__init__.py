@@ -27,6 +27,7 @@ from relengapi.blueprints.slaveloan.model import Machines
 from relengapi.blueprints.slaveloan.model import ManualActions
 from relengapi.blueprints.slaveloan.slave_mappings import slave_patterns
 from relengapi.blueprints.slaveloan.slave_mappings import slave_to_slavetype
+from relengapi.blueprints.slaveloan.statemachine import StateMachine
 from relengapi.lib import angular
 from relengapi.lib import api
 from relengapi.lib.api import apimethod
@@ -282,6 +283,9 @@ def update_loan_action(action_id, body):
                           (action.id))
     session.add(history)
     session.commit()
+    sm = StateMachine(action.loan_id)
+    sm.handle_event('on_complete',
+                    {'action_id': action.id, 'user': action.complete_by})
     return action.to_wsme()
 
 
